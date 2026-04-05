@@ -278,6 +278,7 @@ async def _get_mailboxes(
     pwd: str,
     security: str,
     verify: bool,
+    timeout: int,
     oauth_token: str | None = None,
 ) -> list:
     """Get list of mailbox folders from mail server."""
@@ -291,6 +292,7 @@ async def _get_mailboxes(
             pwd,
             security,
             verify,
+            timeout=timeout,
             oauth_token=oauth_token,
         )
 
@@ -299,18 +301,22 @@ async def _get_mailboxes(
         return []
 
     _LOGGER.debug("Attempting to get mailbox list...")
-    result = await account.list('""', '"*"')
-    status = result.result
-    folderlist = result.lines
-    _LOGGER.debug("Get mailbox status: %s folder list: %s", status, folderlist)
-    mailboxes = []
-    if status != "OK" or not isinstance(folderlist, list):
-        _LOGGER.error("Error listing mailboxes ... using default")
-        mailboxes.append(DEFAULT_FOLDER)
-    else:
-        mailboxes = await _parse_folder_list(folderlist)
+    try:
+        result = await account.list('""', '"*"')
+        status = result.result
+        folderlist = result.lines
+        _LOGGER.debug("Get mailbox status: %s folder list: %s", status, folderlist)
+        mailboxes = []
+        if status != "OK" or not isinstance(folderlist, list):
+            _LOGGER.error("Error listing mailboxes ... using default")
+            mailboxes.append(DEFAULT_FOLDER)
+        else:
+            mailboxes = await _parse_folder_list(folderlist)
 
-    return mailboxes
+        return mailboxes
+    except (TimeoutError, AioImapException, ConnectionRefusedError) as err:
+        _LOGGER.error("Error getting mailbox list: %s", err)
+        return []
 
 
 async def _parse_folder_list(folderlist: list) -> list:
@@ -397,6 +403,10 @@ def _get_schema_imap(user_input: list, default_dict: list) -> Any:
                 CONF_VERIFY_SSL,
                 default=_get_default(CONF_VERIFY_SSL, False),
             ): cv.boolean,
+            vol.Optional(
+                CONF_IMAP_TIMEOUT,
+                default=_get_default(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT),
+            ): vol.All(vol.Coerce(int), vol.Range(min=10)),
         },
     )
 
@@ -428,6 +438,7 @@ async def _get_schema_step_2(
                     data.get(CONF_PASSWORD, ""),
                     data[CONF_IMAP_SECURITY],
                     data[CONF_VERIFY_SSL],
+                    data.get(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT),
                     data.get("token", {}).get("access_token"),
                 ),
             ),
@@ -439,10 +450,6 @@ async def _get_schema_step_2(
                 CONF_SCAN_INTERVAL,
                 default=_get_default(CONF_SCAN_INTERVAL),
             ): vol.All(vol.Coerce(int), vol.Range(min=5)),
-            vol.Optional(
-                CONF_IMAP_TIMEOUT,
-                default=_get_default(CONF_IMAP_TIMEOUT),
-            ): vol.All(vol.Coerce(int), vol.Range(min=10)),
             vol.Optional(
                 CONF_DURATION,
                 default=_get_default(CONF_DURATION),
@@ -662,6 +669,7 @@ async def _validate_login(
             pwd=user_input[CONF_PASSWORD],
             security=user_input[CONF_IMAP_SECURITY],
             verify=user_input[CONF_VERIFY_SSL],
+            timeout=user_input.get(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT),
         )
         result, data = await imap_client.select()
 
@@ -830,6 +838,7 @@ class MailAndPackagesFlowHandler(
             },
         )
         defaults[CONF_AUTH_TYPE] = auth_type
+        defaults.setdefault(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT)
 
         return self.async_show_form(
             step_id="imap_config",
@@ -879,7 +888,6 @@ class MailAndPackagesFlowHandler(
             CONF_PATH: self.hass.config.path() + DEFAULT_PATH,
             CONF_DURATION: DEFAULT_GIF_DURATION,
             CONF_IMAGE_SECURITY: DEFAULT_IMAGE_SECURITY,
-            CONF_IMAP_TIMEOUT: DEFAULT_IMAP_TIMEOUT,
             CONF_GENERATE_GRID: False,
             CONF_GENERATE_MP4: False,
             CONF_ALLOW_EXTERNAL: DEFAULT_ALLOW_EXTERNAL,
@@ -1096,6 +1104,10 @@ class MailAndPackagesFlowHandler(
         defaults[CONF_PASSWORD] = self._entry.data.get(
             CONF_PASSWORD,
             defaults.get(CONF_PASSWORD),
+        )
+        defaults[CONF_IMAP_TIMEOUT] = self._entry.data.get(
+            CONF_IMAP_TIMEOUT,
+            DEFAULT_IMAP_TIMEOUT,
         )
         defaults[CONF_AUTH_TYPE] = auth_type
 

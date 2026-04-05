@@ -217,7 +217,8 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 config.get(CONF_PASSWORD),
                 config.get(CONF_IMAP_SECURITY),
                 config.get(CONF_VERIFY_SSL),
-                config.get("oauth_token"),
+                timeout=self.timeout,
+                oauth_token=config.get("oauth_token"),
             )
         except InvalidAuth as err:
             _LOGGER.error("Authentication failed: %s", err)

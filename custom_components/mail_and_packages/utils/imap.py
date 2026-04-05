@@ -22,6 +22,7 @@ async def login(
     pwd: str,
     security: str,
     verify: bool = True,
+    timeout: int | None = None,
     oauth_token: str | None = None,
 ) -> IMAP4_SSL | IMAP4:
     """Login to IMAP server asynchronously.
@@ -35,22 +36,30 @@ async def login(
         if verify
         else ssl.create_no_verify_ssl_context()
     )
+
+    imap_kwargs = {
+        "host": host,
+        "port": port,
+    }
+    if timeout is not None:
+        imap_kwargs["timeout"] = int(timeout)
+
     if security == "SSL":
-        account = IMAP4_SSL(host=host, port=port, ssl_context=ssl_context)
+        account = IMAP4_SSL(ssl_context=ssl_context, **imap_kwargs)
     else:
-        account = IMAP4(host=host, port=port)
+        account = IMAP4(**imap_kwargs)
 
-    await account.wait_hello_from_server()
+    try:
+        await account.wait_hello_from_server()
 
-    if account.protocol.state == NONAUTH:
-        try:
+        if account.protocol.state == NONAUTH:
             if oauth_token:
                 await account.xoauth2(user, oauth_token)
             else:
                 await account.login(user, pwd)
-        except (AioImapException, OSError) as err:
-            _LOGGER.error("Error logging in to IMAP Server: %s", err)
-            raise InvalidAuth from err
+    except (AioImapException, OSError) as err:
+        _LOGGER.error("Error logging in to IMAP Server: %s", err)
+        raise InvalidAuth from err
 
     if account.protocol.state not in {AUTH, SELECTED}:
         _LOGGER.error("Error logging in to IMAP Server")
