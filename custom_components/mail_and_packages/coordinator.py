@@ -21,7 +21,7 @@ from homeassistant.const import (
     CONF_USERNAME,
     CONF_VERIFY_SSL,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import (
@@ -109,6 +109,12 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         else:
             return file_hash
 
+    @callback
+    def _async_publish_partial(self, data: dict) -> None:
+        """Push intermediate data to all listeners without completing the refresh cycle."""
+        self.data = dict(data)
+        self.async_update_listeners()
+
     async def _async_update_data(self):
         """Fetch data."""
         start = monotonic()
@@ -180,9 +186,13 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             days = config.get(CONF_CUSTOM_DAYS, DEFAULT_CUSTOM_DAYS)
             since_date = (now - datetime.timedelta(days=days)).strftime("%d-%b-%Y")
 
-            # Process logic
+            # Process logic — publish partial data after each shipper completes
+            def _on_shipper_done(partial_shipper_data: dict) -> None:
+                filtered = {k: v for k, v in partial_shipper_data.items() if k != "_tracking_details"}
+                self._async_publish_partial({**data, **filtered})
+
             shipper_data = await self._update_shippers(
-                account, config, today, since_date, cache
+                account, config, today, since_date, cache, on_partial=_on_shipper_done
             )
             tracking_details = shipper_data.pop("_tracking_details", {})
             data.update(shipper_data)
@@ -304,6 +314,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         today: str,
         since_date: str,
         cache: EmailCache,
+        on_partial=None,
     ) -> dict:
         """Group and process sensors by shipper."""
         data = {}
@@ -333,6 +344,8 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                             results.pop("_tracking_details")
                         )
                     data.update(results)
+                    if on_partial:
+                        on_partial(dict(data))
                 success = True
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error("Error processing shipper %s: %s", shipper_name, err)

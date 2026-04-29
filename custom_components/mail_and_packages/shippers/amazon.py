@@ -193,6 +193,10 @@ class AmazonShipper(Shipper):
         )
         order_pattern = re.compile(r"[0-9]{3}-[0-9]{7}-[0-9]{7}")
 
+        resolved_domain = domain or "amazon.com"
+        delivered_subjects = filter_amazon_strings(AMAZON_DELIVERED_SUBJECT, resolved_domain)
+        ordered_subjects = filter_amazon_strings(AMAZON_ORDERED_SUBJECT, resolved_domain)
+
         context = {
             "today": today_date,
             "packages_arriving_today": {},
@@ -204,7 +208,9 @@ class AmazonShipper(Shipper):
         }
 
         for email_id in unique_emails:
-            await self._process_amazon_email(account, email_id, context, cache)
+            await self._process_amazon_email(
+                account, email_id, context, cache, delivered_subjects, ordered_subjects
+            )
 
         final_count = self._calculate_final_count(context)
 
@@ -228,8 +234,15 @@ class AmazonShipper(Shipper):
         email_id: bytes | str,
         ctx: dict,
         cache: EmailCache | None = None,
+        delivered_subjects: list[str] | None = None,
+        ordered_subjects: list[str] | None = None,
     ):
         """Process a single Amazon email."""
+        if delivered_subjects is None:
+            delivered_subjects = AMAZON_DELIVERED_SUBJECT
+        if ordered_subjects is None:
+            ordered_subjects = AMAZON_ORDERED_SUBJECT
+
         fetch_id = email_id.decode() if isinstance(email_id, bytes) else email_id
         if cache:
             data = (await cache.fetch(fetch_id, "(RFC822)"))[1]
@@ -244,13 +257,11 @@ class AmazonShipper(Shipper):
             email_date = await self._parse_email_date(msg)
             email_subject = get_decoded_subject(msg)
 
-            if any(s.lower() in email_subject.lower() for s in AMAZON_ORDERED_SUBJECT):
+            if any(s.lower() in email_subject.lower() for s in ordered_subjects):
                 continue
 
             email_msg = get_email_body(msg)
-            if any(
-                s.lower() in email_subject.lower() for s in AMAZON_DELIVERED_SUBJECT
-            ):
+            if any(s.lower() in email_subject.lower() for s in delivered_subjects):
                 self._handle_delivered_email(email_subject, email_msg, ctx)
                 continue
 
@@ -340,7 +351,9 @@ class AmazonShipper(Shipper):
     ) -> int:
         """Find Amazon Delivered email and handle images."""
         _LOGGER.debug("=== AMAZON DELIVERED SEARCH START ===")
-        subjects = AMAZON_DELIVERED_SUBJECT
+        subjects = filter_amazon_strings(
+            AMAZON_DELIVERED_SUBJECT, amazon_domain or "amazon.com"
+        )
         today = get_today().strftime("%d-%b-%Y")
         count = 0
         all_image_urls = []

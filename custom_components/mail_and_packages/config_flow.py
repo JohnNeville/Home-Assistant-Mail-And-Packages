@@ -829,7 +829,6 @@ async def _validate_login(
     return errors
 
 
-@config_entries.HANDLERS.register(DOMAIN)
 class MailAndPackagesFlowHandler(
     config_entry_oauth2_flow.AbstractOAuth2FlowHandler,
     domain=DOMAIN,
@@ -866,6 +865,13 @@ class MailAndPackagesFlowHandler(
         self._entry = None
         self._data = {}
         self._errors = {}
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> "MailAndPackagesOptionsFlowHandler":
+        """Get the options flow for this handler."""
+        return MailAndPackagesOptionsFlowHandler()
 
     async def async_step_user(self, user_input=None):
         """Handle a flow initialized by the user."""
@@ -1598,19 +1604,20 @@ def _get_schema_options_images(user_input: dict, default_dict: dict) -> Any:
     return vol.Schema(schema)
 
 
-@config_entries.register_options_flow_handler(DOMAIN)
 class MailAndPackagesOptionsFlowHandler(config_entries.OptionsFlow):
     """Options flow for Mail and Packages."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
-        self._data = dict(config_entry.data)
-        self._options = dict(config_entry.options) if config_entry.options else {}
-        self._errors = {}
+        self._data: dict = {}
+        self._options: dict = {}
+        self._errors: dict = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage main options."""
+        if not self._data:
+            self._data = dict(self.config_entry.data)
+            self._options = dict(self.config_entry.options) if self.config_entry.options else {}
         self._errors = {}
 
         if user_input is not None:
@@ -1618,6 +1625,9 @@ class MailAndPackagesOptionsFlowHandler(config_entries.OptionsFlow):
             self._options.update(user_input)
 
             if len(self._errors) == 0:
+                if any(s in self._options.get(CONF_RESOURCES, []) for s in AMAZON_SENSORS):
+                    return await self.async_step_options_amazon()
+
                 # If any custom images are enabled, offer image path configuration
                 if any([
                     user_input.get(CONF_CUSTOM_IMG),
@@ -1629,34 +1639,40 @@ class MailAndPackagesOptionsFlowHandler(config_entries.OptionsFlow):
                 ]):
                     return await self.async_step_images()
 
-                # Otherwise, save and finish
+                # Merge options into entry.data and reload so sensor setup picks up changes
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, **self._options},
+                )
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 return self.async_abort(reason="options_updated")
 
-        # Defaults fallback to current entry data
+        # Prefer previously saved options, fall back to entry data, then hard defaults
+        merged = {**self._data, **self._options}
         defaults = {
-            CONF_FOLDER: self._data.get(CONF_FOLDER, DEFAULT_FOLDER),
-            CONF_RESOURCES: self._data.get(CONF_RESOURCES, []),
-            CONF_SCAN_INTERVAL: self._data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-            CONF_IMAP_TIMEOUT: self._data.get(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT),
-            CONF_DURATION: self._data.get(CONF_DURATION, DEFAULT_GIF_DURATION),
-            CONF_ALLOW_FORWARDED_EMAILS: self._data.get(
+            CONF_FOLDER: merged.get(CONF_FOLDER, DEFAULT_FOLDER),
+            CONF_RESOURCES: merged.get(CONF_RESOURCES, []),
+            CONF_SCAN_INTERVAL: merged.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            CONF_IMAP_TIMEOUT: merged.get(CONF_IMAP_TIMEOUT, DEFAULT_IMAP_TIMEOUT),
+            CONF_DURATION: merged.get(CONF_DURATION, DEFAULT_GIF_DURATION),
+            CONF_ALLOW_FORWARDED_EMAILS: merged.get(
                 CONF_ALLOW_FORWARDED_EMAILS, DEFAULT_ALLOW_FORWARDED_EMAILS
             ),
-            CONF_GENERATE_GRID: self._data.get(CONF_GENERATE_GRID, False),
-            CONF_GENERATE_MP4: self._data.get(CONF_GENERATE_MP4, False),
-            CONF_ALLOW_EXTERNAL: self._data.get(CONF_ALLOW_EXTERNAL, DEFAULT_ALLOW_EXTERNAL),
-            CONF_CUSTOM_IMG: self._data.get(CONF_CUSTOM_IMG, DEFAULT_CUSTOM_IMG),
-            CONF_AMAZON_CUSTOM_IMG: self._data.get(
+            CONF_GENERATE_GRID: merged.get(CONF_GENERATE_GRID, False),
+            CONF_GENERATE_MP4: merged.get(CONF_GENERATE_MP4, False),
+            CONF_ALLOW_EXTERNAL: merged.get(CONF_ALLOW_EXTERNAL, DEFAULT_ALLOW_EXTERNAL),
+            CONF_CUSTOM_IMG: merged.get(CONF_CUSTOM_IMG, DEFAULT_CUSTOM_IMG),
+            CONF_AMAZON_CUSTOM_IMG: merged.get(
                 CONF_AMAZON_CUSTOM_IMG, DEFAULT_AMAZON_CUSTOM_IMG
             ),
-            CONF_UPS_CUSTOM_IMG: self._data.get(CONF_UPS_CUSTOM_IMG, DEFAULT_UPS_CUSTOM_IMG),
-            CONF_WALMART_CUSTOM_IMG: self._data.get(
+            CONF_UPS_CUSTOM_IMG: merged.get(CONF_UPS_CUSTOM_IMG, DEFAULT_UPS_CUSTOM_IMG),
+            CONF_WALMART_CUSTOM_IMG: merged.get(
                 CONF_WALMART_CUSTOM_IMG, DEFAULT_WALMART_CUSTOM_IMG
             ),
-            CONF_FEDEX_CUSTOM_IMG: self._data.get(
+            CONF_FEDEX_CUSTOM_IMG: merged.get(
                 CONF_FEDEX_CUSTOM_IMG, DEFAULT_FEDEX_CUSTOM_IMG
             ),
-            CONF_GENERIC_CUSTOM_IMG: self._data.get(
+            CONF_GENERIC_CUSTOM_IMG: merged.get(
                 CONF_GENERIC_CUSTOM_IMG, DEFAULT_GENERIC_CUSTOM_IMG
             ),
         }
@@ -1676,10 +1692,9 @@ class MailAndPackagesOptionsFlowHandler(config_entries.OptionsFlow):
             self._options.update(user_input)
 
             if len(self._errors) == 0:
-                # Update config entry with combined options
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
-                    options=self._options,
+                    data={**self.config_entry.data, **self._options},
                 )
                 await self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 return self.async_abort(reason="options_updated")
@@ -1707,5 +1722,48 @@ class MailAndPackagesOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="images",
             data_schema=_get_schema_options_images(self._options, defaults),
+            errors=self._errors,
+        )
+
+    async def async_step_options_amazon(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure Amazon options."""
+        self._errors = {}
+        if user_input is not None:
+            self._options.update(user_input)
+            await _validate_amazon_fwds(self._options, self._errors)
+            if len(self._errors) == 0:
+                if any([
+                    self._options.get(CONF_CUSTOM_IMG),
+                    self._options.get(CONF_AMAZON_CUSTOM_IMG),
+                    self._options.get(CONF_UPS_CUSTOM_IMG),
+                    self._options.get(CONF_WALMART_CUSTOM_IMG),
+                    self._options.get(CONF_FEDEX_CUSTOM_IMG),
+                    self._options.get(CONF_GENERIC_CUSTOM_IMG),
+                ]):
+                    return await self.async_step_images()
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, **self._options},
+                )
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                return self.async_abort(reason="options_updated")
+            return await self._show_options_amazon(user_input)
+        return await self._show_options_amazon(user_input)
+
+    async def _show_options_amazon(self, user_input: dict | None) -> ConfigFlowResult:
+        """Show Amazon options form."""
+        merged = {**self._data, **self._options}
+        fwds = merged.get(CONF_AMAZON_FWDS, DEFAULT_AMAZON_FWDS)
+        if isinstance(fwds, list):
+            merged[CONF_AMAZON_FWDS] = ", ".join(fwds) if fwds else "(none)"
+        return self.async_show_form(
+            step_id="options_amazon",
+            data_schema=_get_schema_step_amazon(
+                user_input,
+                merged,
+                forwarding_header=merged.get(CONF_FORWARDING_HEADER, ""),
+            ),
             errors=self._errors,
         )
