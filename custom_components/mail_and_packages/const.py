@@ -148,43 +148,152 @@ AMAZON_DOMAINS = [
     "amazon.ae",
     "amazon.nl",
 ]
-AMAZON_DELIVERED_SUBJECT = [
-    "Delivered: ",
-    "Your Amazon order has arrived!",
-    "Consegna effettuata:",
-    "Dostarczono:",
-    "Geliefert:",
-    "Livré",
-    "Entregado:",
-    "Bezorgd:",
-    "Livraison : Votre",
-    "Zugestellt:",
-]
-AMAZON_SHIPMENT_TRACKING = [
-    "auto-confirm",
-    "shipment-tracking",
-    "order-update",
-    "conferma-spedizione",
-    "confirmar-envio",
-    "versandbestaetigung",
-    "confirmation-commande",
-    "verzending-volgen",
-    "update-bestelling",
-]
-AMAZON_SHIPMENT_SUBJECT = [
-    "Shipped:",
-    "Enviado:",
-    "Out for delivery:",
-    "Spedito:",
-]
-AMAZON_ORDERED_SUBJECT = ["Ordered:", "Pedido efetuado:"]
-AMAZON_EMAIL = [
-    "order-update@",
-    "update-bestelling@",
-    "versandbestaetigung@",
-    "verzending-volgen@",
-    "auto-bevestiging@",
-]
+AMAZON_LANG_CONFIG: Final[dict[str, dict[str, list[str]]]] = {
+    "en": {
+        "delivered": ["Delivered: ", "Your Amazon order has arrived!"],
+        "ordered": ["Ordered:"],
+        "shipment": ["Shipped:", "Out for delivery:"],
+        "email_prefixes": ["order-update@", "auto-confirm@", "shipment-tracking@"],
+        "exception": ["Delivery update:"],
+        "hub_email": ["thehub@amazon.com", "order-update@amazon.com", "amazonlockers@amazon.com"],
+        "time_pattern": [
+            "will arrive:",
+            "estimated delivery date is:",
+            "guaranteed delivery date is:",
+            "Arriving:",
+            "arriving:",
+            "Arriving ",
+        ],
+        "time_pattern_end": [
+            "Previously expected:",
+            "This contains",
+            "Track your",
+            "View or manage order",
+        ],
+        "time_pattern_regex": [
+            "Arriving (\\w+ \\d+) - (\\w+ \\d+)",
+            "Arriving (\\w+ \\d+)",
+            "Arriving (\\w+ ?\\d*)",
+            "Arriving (\\w+)",
+            "Arriving (tomorrow)",
+            "Arriving (today)",
+        ],
+        "dateparser_locales": [""],
+    },
+    "de": {
+        "delivered": ["Geliefert:", "Zugestellt:"],
+        "ordered": [],
+        "shipment": [],
+        "email_prefixes": ["versandbestaetigung@"],
+        "exception": [],
+        "hub_email": ["versandbestaetigung@amazon.de"],
+        "time_pattern": [],
+        "time_pattern_end": [
+            "Verfolge deine(n) Artikel",
+            "Lieferung verfolgen",
+            "Ihr Paket verfolgen",
+        ],
+        "time_pattern_regex": [
+            "Zustellung (\\w+ \\d+) - (\\w+ \\d+)",
+            "Zustellung (\\w+ \\d+)",
+            "Zustellung (\\w+ \\d*)",
+        ],
+        "dateparser_locales": ["de_DE", "de_DE.UTF-8"],
+    },
+    "it": {
+        "delivered": ["Consegna effettuata:"],
+        "ordered": [],
+        "shipment": ["Spedito:"],
+        "email_prefixes": ["conferma-spedizione@"],
+        "exception": [],
+        "hub_email": [],
+        "time_pattern": ["Arriverà:", "In arrivo"],
+        "time_pattern_end": ["Per tracciare il tuo pacco"],
+        "time_pattern_regex": [
+            "Arriverà (\\w+ \\d+) - (\\w+ \\d+)",
+            "Arriverà (\\w+ \\d+)",
+            "Arriverà (\\w+ \\d*)",
+            "In arrivo (\\w+ \\d+) - (\\w+ \\d+)",
+            "In arrivo (\\w+ \\d+)",
+            "In arrivo (\\w+ \\d*)",
+            "In arrivo (\\w+)",
+        ],
+        "dateparser_locales": ["it_IT", "it_IT.UTF-8"],
+    },
+    "fr": {
+        "delivered": ["Livré", "Livraison : Votre"],
+        "ordered": [],
+        "shipment": [],
+        "email_prefixes": ["confirmation-commande@"],
+        "exception": [],
+        "hub_email": [],
+        "time_pattern": ["Arrivée :", "Votre date de livraison prévue est :"],
+        "time_pattern_end": ["Suivre"],
+        "time_pattern_regex": [
+            "Arrivée (\\w+ \\d+) - (\\w+ \\d+)",
+            "Arrivée (\\w+ \\d+)",
+            "Arrivée (\\w+ \\d*)",
+        ],
+        "dateparser_locales": ["fr_CA", "fr_CA.UTF-8"],
+    },
+    "es": {
+        "delivered": ["Entregado:"],
+        "ordered": ["Pedido efetuado:"],
+        "shipment": ["Enviado:"],
+        "email_prefixes": ["confirmar-envio@"],
+        "exception": [],
+        "hub_email": [],
+        "time_pattern": ["Entrega:", "A chegar:", "Chega "],
+        "time_pattern_end": ["Acompanhar", "Seguimiento"],
+        "time_pattern_regex": ["Chega ((\\w+(-\\w+)?))"],
+        "dateparser_locales": ["es_ES", "es_ES.UTF-8", "pt_PT", "pt_PT.UTF-8", "pt_BR", "pt_BR.UTF-8"],
+    },
+    "nl": {
+        "delivered": ["Bezorgd:"],
+        "ordered": [],
+        "shipment": [],
+        "email_prefixes": ["update-bestelling@", "verzending-volgen@", "auto-bevestiging@"],
+        "exception": [],
+        "hub_email": [],
+        "time_pattern": ["Verwachte bezorgdatum:"],
+        "time_pattern_end": ["Volg je pakket", "Je pakket volgen"],
+        "time_pattern_regex": [
+            "Wordt bezorgd op (\\w+ \\d+ \\w+)",
+            "Wordt bezorgd op (\\w+ \\d+)",
+            "Wordt (vandaag) bezorgd",
+        ],
+        "dateparser_locales": [],
+    },
+    "pl": {
+        "delivered": ["Dostarczono:"],
+        "ordered": [],
+        "shipment": [],
+        "email_prefixes": [],
+        "exception": [],
+        "hub_email": [],
+        "time_pattern": ["Dostawa:"],
+        "time_pattern_end": [],
+        "time_pattern_regex": [],
+        "dateparser_locales": ["pl_PL", "pl_PL.UTF-8"],
+    },
+}
+
+AMAZON_DOMAIN_LANG: Final[dict[str, list[str]]] = {
+    "amazon.com": ["en"],
+    "amazon.ca": ["en", "fr"],
+    "amazon.co.uk": ["en"],
+    "amazon.in": ["en"],
+    "amazon.de": ["de"],
+    "amazon.it": ["it"],
+    "amazon.com.au": ["en"],
+    "amazon.pl": ["pl"],
+    "amazon.es": ["es"],
+    "amazon.fr": ["fr"],
+    "amazon.ae": ["en"],
+    "amazon.nl": ["nl"],
+}
+
+
 AMAZON_PACKAGES = "amazon_packages"
 AMAZON_ORDER = "amazon_order"
 AMAZON_DELIVERED = "amazon_delivered"
@@ -197,92 +306,14 @@ AMAZON_IMG_PATTERN = (
 )
 AMAZON_HUB = "amazon_hub"
 AMAZON_HUB_CODE = "amazon_hub_code"
-AMAZON_HUB_EMAIL = [
-    "thehub@amazon.com",
-    "order-update@amazon.com",
-    "amazonlockers@amazon.com",
-    "versandbestaetigung@amazon.de",
-]
 AMAZON_HUB_SUBJECT = ["ready for pickup from Amazon Hub Locker"]
 AMAZON_HUB_SUBJECT_SEARCH = "(a package to pick up)(.*)(\\d{6})"
 AMAZON_HUB_BODY = "(Your pickup code is <b>)(\\d{6})"
-AMAZON_TIME_PATTERN = [
-    "will arrive:",
-    "estimated delivery date is:",
-    "guaranteed delivery date is:",
-    "Arriving:",
-    "Arriverà:",
-    "arriving:",
-    "Arriving ",
-    "Dostawa:",
-    "Entrega:",
-    "A chegar:",
-    "Arrivée :",
-    "Chega ",
-    "Verwachte bezorgdatum:",
-    "Votre date de livraison prévue est :",
-    "In arrivo",
-]
-AMAZON_TIME_PATTERN_END = [
-    "Previously expected:",
-    "This contains",
-    "Track your",
-    "Per tracciare il tuo pacco",
-    "View or manage order",
-    "Acompanhar",
-    "Seguimiento",
-    "Verfolge deine(n) Artikel",
-    "Lieferung verfolgen",
-    "Ihr Paket verfolgen",
-    "Suivre",
-    "Volg je pakket",
-    "Je pakket volgen",
-]
-AMAZON_TIME_PATTERN_REGEX = [
-    "Arriving (\\w+ \\d+) - (\\w+ \\d+)",
-    "Arriving (\\w+ \\d+)",
-    "Arriving (\\w+ ?\\d*)",
-    "Arriving (\\w+)",
-    "Zustellung (\\w+ \\d+) - (\\w+ \\d+)",
-    "Zustellung (\\w+ \\d+)",
-    "Zustellung (\\w+ \\d*)",
-    "Arriverà (\\w+ \\d+) - (\\w+ \\d+)",
-    "Arriverà (\\w+ \\d+)",
-    "Arriverà (\\w+ \\d*)",
-    "Arrivée (\\w+ \\d+) - (\\w+ \\d+)",
-    "Arrivée (\\w+ \\d+)",
-    "Arrivée (\\w+ \\d*)",
-    "Chega ((\\w+(-\\w+)?))",
-    "Wordt bezorgd op (\\w+ \\d+ \\w+)",
-    "Wordt bezorgd op (\\w+ \\d+)",
-    "Wordt (\\w+) bezorgd",
-    "In arrivo (\\w+ \\d+) - (\\w+ \\d+)",
-    "In arrivo (\\w+ \\d+)",
-    "In arrivo (\\w+ \\d*)",
-    "In arrivo (\\w+)",
-]
-AMAZON_EXCEPTION_SUBJECT = "Delivery update:"
+AMAZON_EXCEPTION_SUBJECT: Final[str] = AMAZON_LANG_CONFIG["en"]["exception"][0]
 AMAZON_EXCEPTION_BODY = "running late"
 AMAZON_EXCEPTION = "amazon_exception"
 AMAZON_EXCEPTION_ORDER = "amazon_exception_order"
 AMAZON_PATTERN = "[0-9]{3}-[0-9]{7}-[0-9]{7}"
-AMAZON_LANGS = [
-    "it_IT",
-    "it_IT.UTF-8",
-    "pl_PL",
-    "pl_PL.UTF-8",
-    "de_DE",
-    "de_DE.UTF-8",
-    "es_ES",
-    "es_ES.UTF-8",
-    "pt_PT",
-    "pt_PT.UTF-8",
-    "pt_BR",
-    "pt_BR.UTF-8",
-    "fr_CA",
-    "fr_CA.UTF-8",
-    "",
-]
 AMAZON_OTP = "amazon_otp"
 AMAZON_OTP_CODE = "amazon_otp_code"
 AMAZON_OTP_REGEX = "(\n)(\\d{6})(\n)"

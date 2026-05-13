@@ -14,7 +14,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    AMAZON_DELIVERED_SUBJECT,
     AMAZON_EXCEPTION_SUBJECT,
     AMAZON_HUB_SUBJECT,
     AMAZON_OTP_SUBJECT,
@@ -24,6 +23,7 @@ from .const import (
     CONF_PATH,
     SENSOR_TYPES,
 )
+from .utils.amazon import get_amazon_subjects
 from .shippers import SHIPPER_REGISTRY
 from .shippers.usps import USPSShipper
 from .utils.image import (
@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 amazon_exception = AMAZON_EXCEPTION_SUBJECT
 amazon_hub = AMAZON_HUB_SUBJECT
 amazon_otp = AMAZON_OTP_SUBJECT
-amazon_search_legacy = AMAZON_DELIVERED_SUBJECT
+amazon_search_legacy = get_amazon_subjects("amazon.com", "delivered")
 image_file_name = "mail_today.gif"
 
 

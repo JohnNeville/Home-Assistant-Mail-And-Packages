@@ -16,17 +16,11 @@ import dateparser
 from aioimaplib import IMAP4_SSL
 
 from custom_components.mail_and_packages.const import (
-    AMAZON_DELIVERED_SUBJECT,
+    AMAZON_DOMAIN_LANG,
     AMAZON_DOMAINS,
-    AMAZON_EMAIL,
     AMAZON_IMG_LIST,
     AMAZON_IMG_PATTERN,
-    AMAZON_ORDERED_SUBJECT,
-    AMAZON_SHIPMENT_SUBJECT,
-    AMAZON_SHIPMENT_TRACKING,
-    AMAZON_TIME_PATTERN,
-    AMAZON_TIME_PATTERN_END,
-    AMAZON_TIME_PATTERN_REGEX,
+    AMAZON_LANG_CONFIG,
     DEFAULT_AMAZON_DAYS,
 )
 from custom_components.mail_and_packages.utils.cache import EmailCache
@@ -41,54 +35,14 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
-DOMAIN_LANG_MAP = {
-    "amazon.de": ["versandbestaetigung", "Geliefert:", "Zugestellt:"],
-    "amazon.it": [
-        "conferma-spedizione",
-        "Consegna effettuata:",
-        "Arriverà",
-        "Spedito:",
-    ],
-    "amazon.nl": [
-        "update-bestelling",
-        "verzending-volgen",
-        "auto-bevestiging",
-        "Bezorgd:",
-    ],
-    "amazon.fr": ["confirmation-commande", "Livré", "Livraison : Votre", "Arrivée :"],
-    "amazon.ca": ["confirmation-commande", "Livré", "Livraison : Votre", "Arrivée :"],
-    "amazon.es": [
-        "confirmar-envio",
-        "Entregado:",
-        "Enviado:",
-        "Pedido efetuado:",
-        "Chega ",
-    ],
-    "amazon.pl": ["Dostarczono:"],
-}
 
-
-def filter_amazon_strings(strings: list[str], domain: str) -> list[str]:
-    """Filter list of strings based on the domain language."""
-    all_mapped_strings = []
-    for lang_list in DOMAIN_LANG_MAP.values():
-        all_mapped_strings.extend(lang_list)
-
-    def is_mapped(s: str) -> bool:
-        return any(m in s for m in all_mapped_strings)
-
-    base_strings = [s for s in strings if not is_mapped(s)]
-
-    domain_strings = []
-    if domain in DOMAIN_LANG_MAP:
-        mapped_for_domain = DOMAIN_LANG_MAP[domain]
-        domain_strings = [s for s in strings if any(m in s for m in mapped_for_domain)]
-
-    # Only amazon.ca and unmapped domains (like .com, .co.uk) should use base English strings
-    if domain in DOMAIN_LANG_MAP and domain != "amazon.ca":
-        return list(dict.fromkeys(domain_strings))
-
-    return list(dict.fromkeys(base_strings + domain_strings))
+def get_amazon_subjects(domain: str, key: str) -> list[str]:
+    """Return the subject/prefix strings for a domain and subject category."""
+    langs = AMAZON_DOMAIN_LANG.get(domain, ["en"])
+    result: list[str] = []
+    for lang in langs:
+        result.extend(AMAZON_LANG_CONFIG.get(lang, {}).get(key, []))
+    return list(dict.fromkeys(result))
 
 
 def get_decoded_subject(msg: email.message.Message) -> str:
@@ -151,12 +105,13 @@ async def parse_amazon_arrival_date(
     hass: Any,
     email_msg: str,
     email_date: datetime.date,
+    domain: str = "amazon.com",
 ) -> datetime.date | None:
     """Determine arrival date from email."""
     today_date = get_today()
 
     # Try using regex for more precise extraction of the arrival date string
-    if date_str := amazon_date_regex(email_msg):
+    if date_str := amazon_date_regex(email_msg, domain=domain):
         base_datetime = datetime.datetime.combine(
             email_date or today_date,
             datetime.time(),
@@ -199,7 +154,7 @@ async def parse_amazon_arrival_date(
             return dateobj.date()
 
     # Fallback to chunk-based parsing
-    for search in AMAZON_TIME_PATTERN:
+    for search in get_amazon_subjects(domain, "time_pattern"):
         if search not in email_msg:
             continue
 
@@ -238,13 +193,7 @@ def amazon_email_addresses(
     if domain is None:
         domain = "amazon.com"
 
-    # Use both AMAZON_EMAIL and AMAZON_SHIPMENT_TRACKING for prefixes
-    prefixes = list(AMAZON_EMAIL)
-    for p in AMAZON_SHIPMENT_TRACKING:
-        if f"{p}@" not in prefixes:
-            prefixes.append(f"{p}@")
-
-    prefixes = filter_amazon_strings(prefixes, domain)
+    prefixes = get_amazon_subjects(domain, "email_prefixes")
 
     value = [f"{e}{domain}" for e in prefixes]
     if fwds:
@@ -273,11 +222,12 @@ async def search_amazon_emails(
 
     past_date = get_today() - datetime.timedelta(days=days)
     tfmt = past_date.strftime("%d-%b-%Y")
+    resolved_domain = domain or "amazon.com"
     amazon_subjects = (
-        AMAZON_DELIVERED_SUBJECT + AMAZON_SHIPMENT_SUBJECT + AMAZON_ORDERED_SUBJECT
+        get_amazon_subjects(resolved_domain, "delivered")
+        + get_amazon_subjects(resolved_domain, "shipment")
+        + get_amazon_subjects(resolved_domain, "ordered")
     )
-    if domain:
-        amazon_subjects = filter_amazon_strings(amazon_subjects, domain)
 
     (server_response, sdata) = await email_search(
         account=account,
@@ -378,10 +328,14 @@ def _extract_hub_code(
     return ""
 
 
-def amazon_date_search(email_msg: str, patterns: list[str] | None = None) -> int:
+def amazon_date_search(
+    email_msg: str,
+    patterns: list[str] | None = None,
+    domain: str = "amazon.com",
+) -> int:
     """Search for a date pattern in an email message and return its index."""
     if patterns is None:
-        patterns = AMAZON_TIME_PATTERN_END
+        patterns = get_amazon_subjects(domain, "time_pattern_end")
 
     for pattern in patterns:
         if (index := email_msg.find(pattern)) != -1:
@@ -389,10 +343,14 @@ def amazon_date_search(email_msg: str, patterns: list[str] | None = None) -> int
     return -1
 
 
-def amazon_date_regex(email_msg: str, patterns: list[str] | None = None) -> str | None:
+def amazon_date_regex(
+    email_msg: str,
+    patterns: list[str] | None = None,
+    domain: str = "amazon.com",
+) -> str | None:
     """Search for a date pattern using regex and return the first capture group."""
     if patterns is None:
-        patterns = AMAZON_TIME_PATTERN_REGEX
+        patterns = get_amazon_subjects(domain, "time_pattern_regex")
 
     for pattern in patterns:
         if (found := re.compile(pattern, re.IGNORECASE).search(email_msg)) is not None:
