@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from time import monotonic
 
+import aiohttp
 import anyio
 from aioimaplib import IMAP4_SSL
 from homeassistant.config_entries import ConfigEntry
@@ -141,13 +142,28 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                             )
                             await session.async_ensure_token_valid()
                             config["oauth_token"] = session.token["access_token"]
+                        except aiohttp.ClientResponseError as err:
+                            # 4xx (e.g. invalid_grant from a revoked/expired refresh
+                            # token) won't be fixed by retrying — trigger Home
+                            # Assistant's reauth/repair flow instead of looping.
+                            if 400 <= err.status < 500:
+                                _LOGGER.error(
+                                    "OAuth token refresh rejected, reauthentication required: %s",
+                                    err,
+                                )
+                                raise ConfigEntryAuthFailed(
+                                    "OAuth token refresh rejected"
+                                ) from err
+                            _LOGGER.error("Error refreshing OAuth token")
+                            _LOGGER.debug("OAuth token refresh error details: %s", err)
+                            raise UpdateFailed("OAuth token refresh failed") from err
                         except Exception as err:
                             _LOGGER.error("Error refreshing OAuth token")
                             _LOGGER.debug("OAuth token refresh error details: %s", err)
                             raise UpdateFailed("OAuth token refresh failed") from err
 
                     data = await self.process_emails(self.hass, config)
-                except UpdateFailed:
+                except (UpdateFailed, ConfigEntryAuthFailed):
                     raise
                 except Exception as error:
                     _LOGGER.error("Problem updating sensors: %s", error)
