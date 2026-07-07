@@ -260,16 +260,17 @@ async def test_migration_from_version_16_to_18():
 
 
 async def test_setup_entry_coordinator_failure():
-    """Test setup_entry when coordinator fails to update."""
+    """Test setup_entry doesn't block on/raise from a coordinator that fails to update.
+
+    The first refresh runs in the background (see async_setup_entry), so a
+    failing coordinator no longer prevents setup from completing.
+    """
     mock_hass = MagicMock()
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
-    data = FAKE_CONFIG_DATA.copy()
-    data["resources"] = ["usps_mail"]  # Override for this test
-    mock_config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data=data,
-        entry_id="test_entry_id",
-    )
+    mock_config_entry = MagicMock()
+    mock_config_entry.data = FAKE_CONFIG_DATA.copy()
+    mock_config_entry.data["resources"] = ["usps_mail"]  # Override for this test
+    mock_config_entry.entry_id = "test_entry_id"
 
     # Mock coordinator that fails to update
     mock_coordinator = MagicMock()
@@ -285,24 +286,25 @@ async def test_setup_entry_coordinator_failure():
     ):
         mock_coordinator_class.return_value = mock_coordinator
 
-        # Should load successfully
         assert await async_setup_entry(mock_hass, mock_config_entry) is True
-        mock_hass.async_create_task.assert_called_once()
-        mock_coordinator.async_refresh.assert_called_once()
-        mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
-            mock_config_entry, PLATFORMS
-        )
+
+    # The (failing) first refresh was scheduled in the background, not awaited.
+    mock_config_entry.async_create_background_task.assert_called_once()
+    scheduled_coro = mock_config_entry.async_create_background_task.call_args.args[1]
+    scheduled_coro.close()  # avoid "coroutine was never awaited" warning
 
 
 async def test_setup_entry_auth_failure():
-    """Test setup_entry when coordinator fails with ConfigEntryAuthFailed."""
+    """Test setup_entry doesn't raise ConfigEntryAuthFailed for a coordinator auth failure.
+
+    Auth failures surface via the coordinator's own reauth handling once the
+    backgrounded first refresh completes, not synchronously from setup.
+    """
     mock_hass = MagicMock()
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
-    mock_config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data=FAKE_CONFIG_DATA.copy(),
-        entry_id="test_entry_id",
-    )
+    mock_config_entry = MagicMock()
+    mock_config_entry.data = FAKE_CONFIG_DATA.copy()
+    mock_config_entry.entry_id = "test_entry_id"
 
     # Mock coordinator that fails with ConfigEntryAuthFailed
     mock_coordinator = MagicMock()
@@ -318,13 +320,11 @@ async def test_setup_entry_auth_failure():
     ):
         mock_coordinator_class.return_value = mock_coordinator
 
-        # Should load successfully
         assert await async_setup_entry(mock_hass, mock_config_entry) is True
-        mock_hass.async_create_task.assert_called_once()
-        mock_coordinator.async_refresh.assert_called_once()
-        mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
-            mock_config_entry, PLATFORMS
-        )
+
+    mock_config_entry.async_create_background_task.assert_called_once()
+    scheduled_coro = mock_config_entry.async_create_background_task.call_args.args[1]
+    scheduled_coro.close()  # avoid "coroutine was never awaited" warning
 
 
 async def test_async_remove_config_entry_device():
@@ -577,21 +577,26 @@ async def test_coordinator_binary_sensor_update_amazon_same_hashes():
             assert coordinator._data["amazon_update"] is False
 
 
-async def test_setup_entry_refresh_failure():
-    """Test setup_entry when the coordinator fails to refresh data."""
-    mock_hass = MagicMock()
-    mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
-    mock_config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={
-            "host": "imap.test.com",
-            "scan_interval": 5,
-            "resources": [],
-        },
-        entry_id="test_entry",
-    )
+@pytest.mark.asyncio
+async def test_setup_entry_refresh_failure(hass):
+    """Test setup_entry doesn't block on/raise when the coordinator fails to refresh.
+
+    The first refresh runs in the background, so setup completes regardless.
+    """
+    mock_config_entry = MagicMock()
+    mock_config_entry.data = {
+        "host": "imap.test.com",
+        "scan_interval": 5,
+        "resources": [],
+    }
+    mock_config_entry.entry_id = "test_entry"
     with (
         patch("homeassistant.helpers.frame.report_usage"),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            new=AsyncMock(),
+        ),
         patch(
             "custom_components.mail_and_packages.MailDataUpdateCoordinator",
         ) as mock_coordinator_class,
@@ -600,13 +605,12 @@ async def test_setup_entry_refresh_failure():
         mock_coordinator.last_update_success = False
         mock_coordinator.last_exception = "IMAP Timeout"
         mock_coordinator.async_refresh = AsyncMock()
-        # Should load successfully
-        assert await async_setup_entry(mock_hass, mock_config_entry) is True
-        mock_hass.async_create_task.assert_called_once()
-        mock_coordinator.async_refresh.assert_called_once()
-        mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
-            mock_config_entry, PLATFORMS
-        )
+
+        assert await async_setup_entry(hass, mock_config_entry) is True
+
+    mock_config_entry.async_create_background_task.assert_called_once()
+    scheduled_coro = mock_config_entry.async_create_background_task.call_args.args[1]
+    scheduled_coro.close()  # avoid "coroutine was never awaited" warning
 
 
 @pytest.mark.asyncio

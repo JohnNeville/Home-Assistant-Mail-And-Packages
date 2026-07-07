@@ -139,13 +139,21 @@ async def async_setup_entry(
 
     # Setup the data coordinator
     coordinator = MailDataUpdateCoordinator(hass, config, config_entry)
-
     config_entry.runtime_data = MailAndPackagesData(coordinator=coordinator, cameras=[])
 
-    # Fetch initial data in the background so setup doesn't block
-    hass.async_create_task(coordinator.async_refresh())
-
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
+
+    # Run the first refresh in the background instead of awaiting it here. A slow
+    # or unreachable IMAP server can otherwise block this call long enough for
+    # Home Assistant's own bootstrap timeout to force-cancel the entire config
+    # entry setup. Entities start unavailable and populate once this completes;
+    # auth failures and other errors are handled by the coordinator itself
+    # (reauth flow / retry on its normal update schedule).
+    config_entry.async_create_background_task(
+        hass,
+        coordinator.async_refresh(),
+        name=f"{DOMAIN} initial refresh",
+    )
 
     return True
 
