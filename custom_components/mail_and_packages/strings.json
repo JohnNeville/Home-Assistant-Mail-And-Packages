@@ -41,6 +41,7 @@
           "folder": "Mail Folder",
           "resources": "Sensors List",
           "scan_interval": "Scanning Interval (minutes, minimum 5)",
+          "custom_days": "Days back to check for package emails (minimum 1, default 3)",
           "image_path": "Image Path",
           "gif_duration": "Image Duration (seconds)",
           "image_security": "Random Image Filename",
@@ -54,6 +55,7 @@
           "ups_custom_img": "Use custom 'no UPS delivery' image?",
           "walmart_custom_img": "Use custom 'no Walmart delivery' image?",
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
+          "generic_custom_img": "Use custom 'no Generic delivery' image?",
           "post_de_custom_img": "Use custom Post DE 'no mail' image?",
           "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)"
         },
@@ -87,7 +89,11 @@
       },
       "config_forwarded_emails": {
         "data": {
+          "forwarding_header": "Forwarding Header (e.g. X-SimpleLogin-Original-From)",
           "forwarded_emails": "Forwarded Email Addresses"
+        },
+        "data_description": {
+          "forwarding_header": "If your forwarding service includes the original sender in a header, enter the header name here. This takes precedence over the address list below. Enter '(none)' or leave blank to use the address list instead."
         },
         "description": "By default, the Mail and Packages integration only searches for messages matching a service's address.\n\nIf you want to use forwarded emails, please separate each address messages will be coming from with a comma or enter '(none)' to clear this setting.",
         "title": "Forwarded Email Addresses"
@@ -115,6 +121,7 @@
         "data": {
           "folder": "Mail Folder",
           "scan_interval": "Scanning Interval (minutes, minimum 5)",
+          "custom_days": "Days back to check for package emails (minimum 1, default 3)",
           "image_path": "Image Path",
           "gif_duration": "Image Duration (seconds)",
           "image_security": "Random Image Filename",
@@ -129,6 +136,7 @@
           "ups_custom_img": "Use custom 'no UPS delivery' image?",
           "walmart_custom_img": "Use custom 'no Walmart delivery' image?",
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
+          "generic_custom_img": "Use custom 'no Generic delivery' image?",
           "post_de_custom_img": "Use custom Post DE 'no mail' image?",
           "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)"
         },
@@ -176,7 +184,11 @@
       },
       "reconfig_forwarded_emails": {
         "data": {
+          "forwarding_header": "Forwarding Header (e.g. X-SimpleLogin-Original-From)",
           "forwarded_emails": "Forwarded Email Addresses"
+        },
+        "data_description": {
+          "forwarding_header": "If your forwarding service includes the original sender in a header, enter the header name here. This takes precedence over the address list below. Enter '(none)' or leave blank to use the address list instead."
         },
         "description": "By default, the Mail and Packages integration only searches for messages matching a service's address.\n\nIf you want to use forwarded emails, please separate each address messages will be coming from with a comma or enter '(none)' to clear this setting.",
         "title": "Forwarded Email Addresses"
@@ -198,10 +210,12 @@
     "step": {
       "init": {
         "data": {
+          "folder": "Mail Folder",
           "resources": "Sensors List",
           "scan_interval": "Scanning Interval (minutes, minimum 5)",
+          "custom_days": "Days back to check for package emails (minimum 1, default 3)",
           "gif_duration": "Image Duration (seconds)",
-          "imap_timeout": "Time in seconds before connection timeout (seconds, minimum 10)",
+          "imap_timeout": "Mailbox scan time limit (seconds, minimum 10)",
           "generate_grid": "Create image grid for LLM vision models",
           "generate_mp4": "Create mp4 from images",
           "allow_external": "Create image for notification apps",
@@ -211,10 +225,25 @@
           "walmart_custom_img": "Use custom 'no Walmart delivery' image?",
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
           "generic_custom_img": "Use custom 'no Generic delivery' image?",
+          "post_de_custom_img": "Use custom Post DE 'no mail' image?",
           "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)"
+        },
+        "data_description": {
+          "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster."
         },
         "description": "Customize sensor selections and integration behavior.",
         "title": "Mail and Packages Options"
+      },
+      "options_forwarded_emails": {
+        "data": {
+          "forwarding_header": "Forwarding Header (e.g. X-SimpleLogin-Original-From)",
+          "forwarded_emails": "Forwarded Email Addresses"
+        },
+        "data_description": {
+          "forwarding_header": "If your forwarding service includes the original sender in a header, enter the header name here. This takes precedence over the address list below. Enter '(none)' or leave blank to use the address list instead."
+        },
+        "description": "By default, the Mail and Packages integration only searches for messages matching a service's address.\n\nIf you want to use forwarded emails, please separate each address messages will be coming from with a comma or enter '(none)' to clear this setting.",
+        "title": "Forwarded Email Addresses"
       },
       "options_amazon": {
         "data": {
@@ -232,10 +261,18 @@
           "ups_custom_img_file": "Path to custom UPS image: (ie: images/my_custom_no_ups.jpg)",
           "walmart_custom_img_file": "Path to custom Walmart image: (ie: images/my_custom_no_walmart.jpg)",
           "fedex_custom_img_file": "Path to custom FedEx image: (ie: images/my_custom_no_fedex.jpg)",
-          "generic_custom_img_file": "Path to custom Generic image: (ie: images/my_custom_no_generic.jpg)"
+          "generic_custom_img_file": "Path to custom Generic image: (ie: images/my_custom_no_generic.jpg)",
+          "post_de_custom_img_file": "Path to custom Post DE image: (ie: images/my_custom_no_post_de.gif)"
         },
         "description": "Enter the path and file name to your custom no delivery images below.\n\nExample: images/custom_nomail.gif",
         "title": "Custom Image Paths"
+      },
+      "options_storage": {
+        "data": {
+          "storage": "Directory to store images"
+        },
+        "description": "Please enter the directory you'd like your images to be stored in.\nThe default is auto populated.",
+        "title": "Image storage location"
       }
     }
   },

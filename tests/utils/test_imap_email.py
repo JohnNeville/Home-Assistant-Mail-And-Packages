@@ -1,6 +1,7 @@
 """Tests for IMAP and email utilities."""
 
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from custom_components.mail_and_packages.utils.imap import (
     InvalidAuth,
     _execute_single_search,
     _parse_esearch_line,
+    build_gmail_search,
     build_search,
     clean_search_string,
     decode_folder_ref,
@@ -32,6 +34,7 @@ from custom_components.mail_and_packages.utils.imap import (
     parse_search_response,
     quote_folder,
     selectfolder,
+    supports_gmail_search,
 )
 
 
@@ -1910,3 +1913,192 @@ async def test_email_search_body_threshold():
     )
     search_query = mock_imap.search.call_args.args[0]
     assert "BODY" not in search_query
+
+
+def test_supports_gmail_search():
+    """Test detection of Gmail's X-GM-EXT-1 capability."""
+    mock_acc = AsyncMock()
+    # Default mock: capabilities membership check is False
+    assert supports_gmail_search(mock_acc) is False
+
+    mock_acc.protocol.capabilities = ["IMAP4rev1", "X-GM-EXT-1"]
+    assert supports_gmail_search(mock_acc) is True
+
+    mock_acc.protocol.capabilities = ["IMAP4rev1"]
+    assert supports_gmail_search(mock_acc) is False
+
+    # Non-iterable capabilities
+    mock_acc.protocol.capabilities = 42
+    assert supports_gmail_search(mock_acc) is False
+
+    # Object without protocol attribute
+    assert supports_gmail_search(object()) is False
+
+
+def test_build_gmail_search_basic():
+    """Test X-GM-RAW query structure for a single address and subject."""
+    expected_epoch = int(datetime.strptime("25-Mar-2026", "%d-%b-%Y").timestamp())
+    query = build_gmail_search(["test@example.com"], "25-Mar-2026", subject="Test")
+    assert query == (
+        'X-GM-RAW "from:(test@example.com) subject:(\\"Test\\") '
+        f'after:{expected_epoch}"'
+    )
+
+
+def test_build_gmail_search_multi_terms():
+    """Test X-GM-RAW query with multiple addresses, subjects, and bodies."""
+    query = build_gmail_search(
+        ["a@x.com", "b@y.com"],
+        "25-Mar-2026",
+        subject=["Sub One", "Sub Two"],
+        body=["out for delivery", "arriving"],
+    )
+    assert query.startswith('X-GM-RAW "')
+    assert query.endswith('"')
+    assert "from:(a@x.com OR b@y.com)" in query
+    assert 'subject:(\\"Sub One\\" OR \\"Sub Two\\")' in query
+    # Gmail has no body-only operator; bodies become a bare quoted phrase group
+    assert '(\\"out for delivery\\" OR \\"arriving\\")' in query
+
+
+def test_build_gmail_search_sanitizes_terms():
+    """Test quotes/backslashes are removed and accents transliterated to ASCII."""
+    query = build_gmail_search(
+        ["test@example.com"], "25-Mar-2026", subject='Livré "en" cours\\'
+    )
+    assert 'subject:(\\"Livre en cours\\")' in query
+
+
+def test_build_gmail_search_fallback_cases():
+    """Test build_gmail_search returns None when a query cannot be built."""
+    # Unparseable date -> caller falls back to standard search
+    assert build_gmail_search(["test@example.com"], "not-a-date") is None
+
+    # Addresses that sanitize to nothing -> caller falls back
+    assert build_gmail_search(['"'], "25-Mar-2026") is None
+
+    # Empty address list is a programming error, same as build_search
+    with pytest.raises(ValueError):
+        build_gmail_search([], "25-Mar-2026")
+
+
+@pytest.mark.asyncio
+async def test_email_search_gmail_single_folder():
+    """Test Gmail-capable server uses one X-GM-RAW search without subject batching."""
+    mock_imap = AsyncMock()
+    mock_imap._folders = ["INBOX"]
+    mock_imap.protocol.capabilities = ["IMAP4rev1", "X-GM-EXT-1"]
+    mock_imap.search.return_value = MagicMock(result="OK", lines=[b"SEARCH 1 2"])
+
+    # More than 10 subjects: the standard path would issue two batched searches
+    subjects = [f"Sub{i}" for i in range(15)]
+    result = await email_search(
+        mock_imap, ["test@example.com"], "25-Mar-2026", subject=subjects
+    )
+
+    assert result == ("OK", [b"1 2"])
+    assert mock_imap.search.call_count == 1
+    search_query = mock_imap.search.call_args.args[0]
+    assert search_query.startswith('X-GM-RAW "')
+    assert "from:(test@example.com)" in search_query
+    assert '\\"Sub14\\"' in search_query
+
+
+@pytest.mark.asyncio
+async def test_email_search_gmail_multi_folder():
+    """Test Gmail X-GM-RAW query flows through the multi-folder sequential search."""
+    mock_imap = AsyncMock()
+    mock_imap._folders = ["INBOX", "Junk"]
+    mock_imap._current_folder = None
+    mock_imap.protocol.capabilities = ["X-GM-EXT-1"]
+    mock_imap.has_capability.return_value = False
+    mock_imap.select.return_value = MagicMock()
+    mock_imap.uid_search.side_effect = [
+        MagicMock(result="OK", lines=[b"1001"]),
+        MagicMock(result="OK", lines=[b"2001"]),
+    ]
+
+    result = await email_search(
+        mock_imap, ["test@example.com"], "25-Mar-2026", subject="Test"
+    )
+
+    assert result == ("OK", [b"INBOX/1001 Junk/2001"])
+    search_query = mock_imap.uid_search.call_args.args[0]
+    assert search_query.startswith('X-GM-RAW "')
+
+
+@pytest.mark.asyncio
+async def test_email_search_gmail_header_fallback():
+    """Test forwarding-header searches stay on the standard RFC 3501 path."""
+    mock_imap = AsyncMock()
+    mock_imap._folders = ["INBOX"]
+    mock_imap.protocol.capabilities = ["X-GM-EXT-1"]
+    mock_imap.search.return_value = MagicMock(result="OK", lines=[b"1"])
+
+    result = await email_search(
+        mock_imap,
+        ["test@example.com"],
+        "25-Mar-2026",
+        subject="Test",
+        header="X-SimpleLogin-Original-From",
+    )
+
+    assert result[0] == "OK"
+    search_query = mock_imap.search.call_args.args[0]
+    assert "X-GM-RAW" not in search_query
+    assert 'HEADER "X-SimpleLogin-Original-From"' in search_query
+
+
+@pytest.mark.asyncio
+async def test_email_search_gmail_invalid_date_fallback():
+    """Test unparseable dates fall back to the standard search path."""
+    mock_imap = AsyncMock()
+    mock_imap._folders = ["INBOX"]
+    mock_imap.protocol.capabilities = ["X-GM-EXT-1"]
+    mock_imap.search.return_value = MagicMock(result="OK", lines=[b"1"])
+
+    result = await email_search(mock_imap, ["test@example.com"], "bad-date")
+
+    assert result[0] == "OK"
+    search_query = mock_imap.search.call_args.args[0]
+    assert "X-GM-RAW" not in search_query
+    assert "SINCE bad-date" in search_query
+
+
+@pytest.mark.asyncio
+async def test_email_search_gmail_errors():
+    """Test error handling on the Gmail search paths."""
+    mock_imap = AsyncMock()
+    mock_imap._folders = ["INBOX"]
+    mock_imap.protocol.capabilities = ["X-GM-EXT-1"]
+
+    # Single-folder OSError
+    mock_imap.search.side_effect = OSError("Search error")
+    res = await email_search(mock_imap, ["test@example.com"], "25-Mar-2026")
+    assert res == ("BAD", "Search error")
+
+    # Single-folder TimeoutError propagates
+    mock_imap.search.side_effect = TimeoutError()
+    with pytest.raises(TimeoutError):
+        await email_search(mock_imap, ["test@example.com"], "25-Mar-2026")
+
+    # Multi-folder OSError
+    mock_imap_multi = AsyncMock()
+    mock_imap_multi._folders = ["INBOX", "Junk"]
+    mock_imap_multi.protocol.capabilities = ["X-GM-EXT-1"]
+    with patch(
+        "custom_components.mail_and_packages.utils.imap._execute_single_search",
+        side_effect=OSError("Search error"),
+    ):
+        res = await email_search(mock_imap_multi, ["test@example.com"], "25-Mar-2026")
+        assert res == ("BAD", "Search error")
+
+    # Multi-folder TimeoutError propagates
+    with (
+        patch(
+            "custom_components.mail_and_packages.utils.imap._execute_single_search",
+            side_effect=TimeoutError(),
+        ),
+        pytest.raises(TimeoutError),
+    ):
+        await email_search(mock_imap_multi, ["test@example.com"], "25-Mar-2026")

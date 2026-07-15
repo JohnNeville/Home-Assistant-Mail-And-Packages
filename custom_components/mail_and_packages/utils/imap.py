@@ -5,6 +5,7 @@ import binascii
 import logging
 import re
 import unicodedata
+from datetime import datetime
 from urllib.parse import quote, unquote
 
 import aioimaplib
@@ -334,6 +335,103 @@ def build_search(  # noqa: C901
     return (False, imap_search)
 
 
+GMAIL_CAPABILITY = "X-GM-EXT-1"
+
+
+def supports_gmail_search(account: IMAP4_SSL | IMAP4) -> bool:
+    """Return True if the server advertises Gmail's X-GM-EXT-1 extension.
+
+    Checks protocol.capabilities directly (the same data aioimaplib's
+    has_capability reads) so that mocked accounts in tests safely
+    default to False.
+    """
+    capabilities = getattr(getattr(account, "protocol", None), "capabilities", None)
+    if capabilities is None:
+        return False
+    try:
+        return GMAIL_CAPABILITY in capabilities
+    except TypeError:
+        return False
+
+
+def _clean_gmail_term(val: str) -> str:
+    """Sanitize a term for embedding in an X-GM-RAW quoted phrase.
+
+    Reuses clean_search_string (NFKD normalize, strip non-ASCII, drop double
+    quotes) so the query is pure ASCII — Gmail search is diacritic-insensitive,
+    so e.g. 'Livre' still matches 'Livré' — and additionally removes
+    backslashes so terms cannot break out of the quoted query string.
+    """
+    return clean_search_string(val).replace("\\", "").strip()
+
+
+def build_gmail_search(
+    address: list,
+    date: str,
+    subject: str | list[str] = "",
+    body: str | list[str] = "",
+) -> str | None:
+    """Build a Gmail X-GM-RAW search query string.
+
+    Gmail answers X-GM-RAW searches from its native search index, which stays
+    fast on large mailboxes where long RFC 3501 OR/SUBJECT/BODY chains force
+    a slow sequential scan. The query is still scoped to the currently
+    selected folder, and OR groups are native so subjects never need to be
+    batched into multiple SEARCH round-trips.
+
+    after: uses epoch seconds (midnight local time, matching the IMAP SINCE
+    date the standard path uses) to avoid ambiguity in how Gmail interprets
+    date strings across timezones.
+
+    Gmail has no body-only operator, so body terms are searched as bare
+    quoted phrases across the whole message; the from:/subject: terms keep
+    the result set narrow, and client-side text filtering still applies.
+
+    Returns None if the query cannot be built, in which case the caller
+    falls back to a standard RFC 3501 search.
+    """
+    if not address:
+        raise ValueError("address list must not be empty")
+
+    try:
+        after_epoch = int(datetime.strptime(date, "%d-%b-%Y").timestamp())
+    except ValueError:
+        return None
+
+    addresses = [_clean_gmail_term(a) for a in address]
+    addresses = [a for a in addresses if a]
+    if not addresses:
+        return None
+
+    terms = [f"from:({' OR '.join(addresses)})"]
+
+    if subject:
+        subjects = [subject] if isinstance(subject, str) else subject
+        safe_subjects = [_clean_gmail_term(s) for s in subjects]
+        safe_subjects = [s for s in safe_subjects if s]
+        if safe_subjects:
+            joined = " OR ".join(f'"{s}"' for s in safe_subjects)
+            terms.append(f"subject:({joined})")
+
+    if body:
+        bodies = [body] if isinstance(body, str) else body
+        safe_bodies = [_clean_gmail_term(b) for b in bodies]
+        safe_bodies = [b for b in safe_bodies if b]
+        if safe_bodies:
+            joined = " OR ".join(f'"{b}"' for b in safe_bodies)
+            terms.append(f"({joined})")
+
+    terms.append(f"after:{after_epoch}")
+
+    raw_query = " ".join(terms)
+    escaped = raw_query.replace("\\", "\\\\").replace('"', '\\"')
+    imap_search = f'X-GM-RAW "{escaped}"'
+
+    _LOGGER.debug("DEBUG gmail imap_search: %s", imap_search)
+
+    return imap_search
+
+
 def parse_search_response(lines: list[bytes]) -> list[bytes]:
     """Parse IMAP SEARCH response lines and return list of UID/ID bytes.
 
@@ -501,6 +599,12 @@ async def email_search(  # noqa: C901
 
     If multiple subjects are provided, they are searched in batches of 10
     to keep the search query length safe.
+
+    On servers advertising X-GM-EXT-1 (Gmail), the query is issued as a
+    single X-GM-RAW search instead, which Gmail answers from its native
+    search index — fast on large mailboxes and without subject batching.
+    Forwarding-header searches are the exception, as HEADER has no
+    X-GM-RAW equivalent.
     """
     folders = getattr(account, "_folders", ["INBOX"])
     is_yahoo = False
@@ -516,6 +620,33 @@ async def email_search(  # noqa: C901
         bodies = [body] if isinstance(body, str) else body
         if len(bodies) > 2:
             body_search = ""
+
+    # Gmail advertises X-GM-EXT-1: use its indexed native search instead of
+    # RFC 3501 OR-chains, which Gmail answers with a slow full-mailbox scan
+    # on large accounts. HEADER criteria have no X-GM-RAW equivalent, so
+    # forwarding-header configs stay on the standard search path.
+    if not header and supports_gmail_search(account):
+        gmail_query = build_gmail_search(address, date, subject, body_search)
+        if gmail_query:
+            if len(folders) <= 1:
+                try:
+                    res = await account.search(gmail_query, charset=None)
+                except TimeoutError:
+                    raise
+                except (AioImapException, OSError) as err:
+                    _LOGGER.error("Error searching emails: %s", err)
+                    return ("BAD", str(err))
+                parsed = parse_search_response(res.lines)
+                return (res.result, [b" ".join(parsed)])
+
+            try:
+                uids = await _execute_single_search(account, gmail_query)
+            except TimeoutError:
+                raise
+            except (AioImapException, OSError) as err:
+                _LOGGER.error("Error searching emails: %s", err)
+                return ("BAD", str(err))
+            return ("OK", [b" ".join(uids)])
 
     if len(folders) <= 1:
         if not isinstance(subject, list) or len(subject) <= 10:
